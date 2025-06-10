@@ -30,7 +30,7 @@ jobs:
       # Runs a single command using the runners shell
       - name: Build Vue dist
         run: |
-          NUXT_PUBLIC_REBRICKABLE_API_SECRET=${{ env.NUXT_PUBLIC_REBRICKABLE_API_SECRET }}
+          NUXT_PUBLIC_REBRICKABLE_API_SECRET=${{ secrets.NUXT_PUBLIC_REBRICKABLE_API_SECRET }}
           yarn install
           yarn generate
 

@@ -35,6 +35,7 @@ let kit = ref<Record<string, number>>({});
 if (active_set_id.value > 0) {
   kit = useLocalStorage(`setkit.kit.${active_set_id.value}`, {});
 }
+const showPicked = ref(false)
 
 const set_list = [
   60378,
@@ -147,7 +148,7 @@ const kitted_parts = computed(() => {
 })
 
 const debug = ref(false)
-const drawNavigation = ref(false);
+const drawNavigation = ref(true);
 
 </script>
 
@@ -183,6 +184,7 @@ const drawNavigation = ref(false);
                   <v-list-item title="Year" :subtitle="set?.year" />
                   <v-list-item title="Number of Parts" :subtitle="set?.num_parts" />
                 </v-list>
+                <v-checkbox label="Show Picked" v-model="showPicked" />
               </v-col>
             </v-row>
             <v-row>
@@ -201,7 +203,8 @@ const drawNavigation = ref(false);
 
         <!-- part list -->
         <v-row>
-          <v-col v-for="part in parts" cols="12" sm="6" md="4" lg="3">
+          <template v-for="part in parts">
+            <v-col cols="12" sm="6" md="4" lg="3" v-if="showPicked || (kit[`${part.part.part_num}-${part.color.id}`] || 0) < part.quantity">
             <!-- standard card for non mobile -->
             <v-card 
               v-if="breakpoints.greaterOrEqual('sm').value"
@@ -266,6 +269,7 @@ const drawNavigation = ref(false);
               </v-card-text>
             </v-card>
           </v-col>
+          </template>
         </v-row>
 
         <hr class="mb-3"/>

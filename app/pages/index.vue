@@ -4,7 +4,7 @@ import { useLocalStorage, useBreakpoints, breakpointsVuetifyV3 } from "@vueuse/c
 
 interface I_SET {
   name: string,
-  set_num: number,
+  set_num: string,
   set_img_url: string,
   year: number,
   num_parts: number,
@@ -24,19 +24,41 @@ interface I_PART {
 }
 
 const api_secret = useRuntimeConfig().public.rebrickableApiSecret;
-
 const breakpoints = useBreakpoints(breakpointsVuetifyV3)
 
-const set = useLocalStorage<I_SET | null>('setkit.set', null);
+// not sure why a custom serializer is needed, but without this the localStorage always reads [Object object]
+// this is the currently active set
+const set = useLocalStorage<I_SET>('setkit.set', null, {
+  serializer: {
+    read: (value) => {
+      try {
+        return JSON.parse(value);
+      } catch (e) {
+        return {};
+      }
+    },
+    write: (value) => {
+      const serialized = JSON.stringify(toRaw(value));
+      return serialized;
+    }
+  }
+});
+
+// this is the complete parts list for the currently active set
 const parts = useLocalStorage<I_PART[]>('setkit.parts', [])
+
+// store the currently active set id. This may be removed later on since the set id is inside set as well
 const active_set_id = useLocalStorage<number>('setkit.active_set', -1);
 
+// a list of all kits that the user has started
+const kits = useLocalStorage<Record<number, I_SET>>('setkit.kits', {})
+
+// the currently active kit, with inactive kits stored in localsession as well
 let kit = ref<Record<string, number>>({});
-if (active_set_id.value > 0) {
-  kit = useLocalStorage(`setkit.kit.${active_set_id.value}`, {});
-}
+
 const showPicked = ref(false)
 
+// list of sets that can be used for random set selection during debugging
 const set_list = [
   60378,
   30161,
@@ -69,7 +91,7 @@ const set_list = [
   10790,
   21166,
   21241,
-  21546,
+  21246,
   21242,
   21179,
   21170,
@@ -79,21 +101,26 @@ const set_list = [
 ]
 
 async function searchForSet() {
-  set.value = {}
   parts.value = []
-  kit.value = {}
 
   let response = await fetch(`https://rebrickable.com/api/v3/lego/sets/${active_set_id.value}-1/?key=${api_secret}`);
   set.value = await response.json()
+
+  if (kits.value.hasOwnProperty(active_set_id.value) === false) {
+    kits.value[active_set_id.value] = set.value
+  }
+  kit = useLocalStorage(`setkit.kit.${active_set_id.value}`, {})
 
   let next = `https://rebrickable.com/api/v3/lego/sets/${active_set_id.value}-1/parts?key=${api_secret}`
 
   while (next != null) {
     response = await fetch(next);
     let result = await response.json();
-    parts.value = parts.value.concat(result['results'].filter(p => p.is_spare === false));
+    parts.value = parts.value.concat(result['results'].filter((p: { is_spare: boolean; }) => p.is_spare === false));
     next = result['next'];
   }
+
+  // ISSUE #5 - load minifigs as well
 }
 
 function loadRandomSet() {
@@ -141,6 +168,21 @@ function highlightPart(part_key: string) {
   console.log(part_key)
 }
 
+function activateKit(set_id: number | string) {
+  if (typeof(set_id) === 'string') {
+    set_id = parseInt(set_id.split('-')[0] ?? "-1")
+  }
+  active_set_id.value = set_id;
+  searchForSet()
+}
+
+function removeKit(set_id: number | string) {
+  if (typeof(set_id) === 'string') {
+    set_id = parseInt(set_id.split('-')[0] ?? "-1")
+  }
+  delete kits.value[set_id]
+}
+
 const kitted_parts = computed(() => {
   const all_parts = Object.values(kit.value)
   if (all_parts.length == 0) return 0;
@@ -165,8 +207,26 @@ const drawNavigation = ref(true);
     <v-list>
       <v-list-item link title="Search for Set" @click="searchForSet"/>
       <v-list-item><v-text-field label="Set ID" v-model="active_set_id" @keypress.enter="searchForSet"></v-text-field></v-list-item>
-      <v-list-item link title="Random Set" @click="loadRandomSet"/>
+      <v-divider />
       <!-- <v-list-item link title="Import from CSV" /> -->
+      <v-list-item v-for="kit in kits" >
+        <template v-slot:title>
+          <v-list-item-title @click="activateKit(kit.set_num)">{{ kit.name }}</v-list-item-title>
+        </template>
+        <template v-slot:subtitle>
+          <v-list-item-subtitle>{{ kit.set_num.split('-')[0] }}</v-list-item-subtitle>
+        </template>
+        <template v-slot:append>
+          <v-btn
+            color="grey-lighten-1"
+            icon="mdi-delete"
+            variant="text"
+            @click="removeKit(kit.set_num)"
+          ></v-btn>
+        </template>
+      </v-list-item>
+      <v-divider />
+      <v-list-item link title="Random Set" @click="loadRandomSet"/>
     </v-list>
   </v-navigation-drawer>
   <v-main>
@@ -205,70 +265,70 @@ const drawNavigation = ref(true);
         <v-row>
           <template v-for="part in parts">
             <v-col cols="12" sm="6" md="4" lg="3" v-if="showPicked || (kit[`${part.part.part_num}-${part.color.id}`] || 0) < part.quantity">
-            <!-- standard card for non mobile -->
-            <v-card 
-              v-if="breakpoints.greaterOrEqual('sm').value"
-              :color="(kit[`${part.part.part_num}-${part.color.id}`] || 0) < part.quantity ? '' : 'green-lighten-4'" 
-              class="mb-3 justify-center">
-              <v-card-title @click="highlightPart">{{ part.part.part_num }} ({{ part.color.name }})</v-card-title>
-              <v-card-subtitle>{{ part.part.name }}</v-card-subtitle>
-              <v-card-text>
-                <v-container>
-                  <v-row class="mb-3 justify-center">
-                    <v-img :height="128" :src="part.part.part_img_url" class="border-medium border-medium rounded"/>
-                  </v-row>
-                  <v-row class="mb-3 justify-center">
-                    <v-btn-group density="compact">
-                      <v-btn color="red-lighten-3" @click="decrementPart(`${part.part.part_num}-${part.color.id}`)">
-                        <v-icon icon="mdi-minus-thick"></v-icon>
-                      </v-btn>
-                      <v-btn color="green-lighten-2" @click="completePart(`${part.part.part_num}-${part.color.id}`)">
-                        <v-icon>mdi-check-decagram</v-icon>
-                      </v-btn>
-                      <v-btn color="blue-lighten-2" @click="incrementPart(`${part.part.part_num}-${part.color.id}`)">
-                        <v-icon icon="mdi-plus-thick" />
-                      </v-btn>
-                    </v-btn-group>
-                  </v-row>
-                  <v-row class="justify-center text-button">{{ kit[`${part.part.part_num}-${part.color.id}`] || 0 }} / {{ part.quantity }}</v-row>
-                </v-container>
-              </v-card-text>
-            </v-card>
+                <!-- standard card for non mobile -->
+                <v-card 
+                  v-if="breakpoints.greaterOrEqual('sm').value"
+                  :color="(kit[`${part.part.part_num}-${part.color.id}`] || 0) < part.quantity ? '' : 'green-lighten-4'" 
+                  class="mb-3 justify-center">
+                  <v-card-title @click="highlightPart">{{ part.part.part_num }} ({{ part.color.name }})</v-card-title>
+                  <v-card-subtitle>{{ part.part.name }}</v-card-subtitle>
+                  <v-card-text>
+                    <v-container>
+                      <v-row class="mb-3 justify-center">
+                        <v-img :height="128" :src="part.part.part_img_url" class="border-medium border-medium-rounded"/>
+                      </v-row>
+                      <v-row class="mb-3 justify-center">
+                        <v-btn-group density="compact">
+                          <v-btn color="red-lighten-3" @click="decrementPart(`${part.part.part_num}-${part.color.id}`)">
+                            <v-icon icon="mdi-minus-thick"></v-icon>
+                          </v-btn>
+                          <v-btn color="green-lighten-2" @click="completePart(`${part.part.part_num}-${part.color.id}`)">
+                            <v-icon>mdi-check-decagram</v-icon>
+                          </v-btn>
+                          <v-btn color="blue-lighten-2" @click="incrementPart(`${part.part.part_num}-${part.color.id}`)">
+                            <v-icon icon="mdi-plus-thick" />
+                          </v-btn>
+                        </v-btn-group>
+                      </v-row>
+                      <v-row class="justify-center text-button">{{ kit[`${part.part.part_num}-${part.color.id}`] || 0 }} / {{ part.quantity }}</v-row>
+                    </v-container>
+                  </v-card-text>
+                </v-card>
 
-            <!-- xs card for mobile -->
-            <v-card 
-              v-else
-              :color="(kit[`${part.part.part_num}-${part.color.id}`] || 0) < part.quantity ? '' : 'green-lighten-4'" 
-              class="mb-3 justify-center">
-              <v-card-text>
-                <v-container>
-                  <v-row class="mb-3 justify-center">
-                    <v-col cols="3"><v-img :src="part.part.part_img_url" class="border-medium border-medium rounded"/></v-col>
-                    <v-col cols="9">
-                      <p class="text-h6">{{ part.part.part_num }} ({{ part.color.name }})</p>
-                      <p class="font-weight-light">{{ part.part.name }}</p>
-                    </v-col>
-                  </v-row>
-                  <v-row class="justify-center">
-                    <v-col cols="3" class="text-center">{{ kit[`${part.part.part_num}-${part.color.id}`] || 0 }} / {{ part.quantity }}</v-col>
-                    <v-col cols="9">
-                      <v-btn-group density="compact">
-                        <v-btn color="red-lighten-3" @click="decrementPart(`${part.part.part_num}-${part.color.id}`)">
-                          <v-icon icon="mdi-minus-thick"></v-icon>
-                        </v-btn>
-                        <v-btn color="green-lighten-2" @click="completePart(`${part.part.part_num}-${part.color.id}`)">
-                          <v-icon>mdi-check-decagram</v-icon>
-                        </v-btn>
-                        <v-btn color="blue-lighten-2" @click="incrementPart(`${part.part.part_num}-${part.color.id}`)">
-                          <v-icon icon="mdi-plus-thick" />
-                        </v-btn>
-                      </v-btn-group>
-                    </v-col>
-                  </v-row>
-                </v-container>
-              </v-card-text>
-            </v-card>
-          </v-col>
+                <!-- xs card for mobile -->
+                <v-card 
+                  v-else
+                  :color="(kit[`${part.part.part_num}-${part.color.id}`] || 0) < part.quantity ? '' : 'green-lighten-4'" 
+                  class="mb-3 justify-center">
+                  <v-card-text>
+                    <v-container>
+                      <v-row class="mb-3 justify-center">
+                        <v-col cols="3"><v-img :src="part.part.part_img_url" class="border-medium border-medium-rounded"/></v-col>
+                        <v-col cols="9">
+                          <p class="text-h6">{{ part.part.part_num }} ({{ part.color.name }})</p>
+                          <p class="font-weight-light">{{ part.part.name }}</p>
+                        </v-col>
+                      </v-row>
+                      <v-row class="justify-center">
+                        <v-col cols="3" class="text-center">{{ kit[`${part.part.part_num}-${part.color.id}`] || 0 }} / {{ part.quantity }}</v-col>
+                        <v-col cols="9">
+                          <v-btn-group density="compact">
+                            <v-btn color="red-lighten-3" @click="decrementPart(`${part.part.part_num}-${part.color.id}`)">
+                              <v-icon icon="mdi-minus-thick"></v-icon>
+                            </v-btn>
+                            <v-btn color="green-lighten-2" @click="completePart(`${part.part.part_num}-${part.color.id}`)">
+                              <v-icon>mdi-check-decagram</v-icon>
+                            </v-btn>
+                            <v-btn color="blue-lighten-2" @click="incrementPart(`${part.part.part_num}-${part.color.id}`)">
+                              <v-icon icon="mdi-plus-thick" />
+                            </v-btn>
+                          </v-btn-group>
+                        </v-col>
+                      </v-row>
+                    </v-container>
+                  </v-card-text>
+                </v-card>
+            </v-col>
           </template>
         </v-row>
 
@@ -278,11 +338,11 @@ const drawNavigation = ref(true);
         <v-card class="mb-3" color="red-lighten-3">
           <v-card-title @click="debug = !debug">Debug</v-card-title>
           <v-card-text v-if="debug">
-            <pre>Rebricable API Key: {{ api_secret }}</pre>
-            <hr class="my-3"/>
             <pre>{{ set }}</pre>
             <hr class="my-3"/>
             <pre>{{ parts }}</pre>
+            <hr class="my-3"/>
+            <pre>{{ kit }}</pre>
           </v-card-text>
         </v-card>
 

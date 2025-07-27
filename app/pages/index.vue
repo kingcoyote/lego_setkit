@@ -107,6 +107,7 @@ async function searchForSet() {
   parts.value = []
 
   let response = await fetch(`https://rebrickable.com/api/v3/lego/sets/${active_set_id.value}-1/?key=${api_secret}`);
+  let result : { results: any[], next: string };
   set.value = await response.json()
 
   if (kits.value.hasOwnProperty(active_set_id.value) === false) {
@@ -118,9 +119,18 @@ async function searchForSet() {
 
   while (next != null) {
     response = await fetch(next);
-    let result = await response.json();
+    result = await response.json();
     parts.value = parts.value.concat(result['results'].filter((p: { is_spare: boolean; }) => p.is_spare === false));
     next = result['next'];
+  }
+
+  response = await fetch(`https://rebrickable.com/api/v3/lego/sets/${active_set_id.value}-1/minifigs?key=${api_secret}`)
+  result = await response.json();
+
+  for (let set of result['results']) {
+    response = await fetch(`https://rebrickable.com/api/v3/lego/minifigs/${set.set_num}/parts?key=${api_secret}`);
+    result = await response.json();
+    parts.value = parts.value.concat(result['results'].filter((p: { is_spare: boolean; }) => p.is_spare === false));
   }
 
   // ISSUE #5 - load minifigs as well

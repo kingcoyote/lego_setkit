@@ -184,7 +184,7 @@ function removeKit(set_id: number | string) {
 }
 
 const kitted_parts = computed(() => {
-  const all_parts = Object.values(kit.value)
+  const all_parts = Object.values(unref(kit))
   if (all_parts.length == 0) return 0;
   return all_parts.reduce((a, b) => a + b);
 })

@@ -101,6 +101,9 @@ const set_list = [
 ]
 
 async function searchForSet() {
+  if (breakpoints.isSmallerOrEqual("sm"))
+    drawNavigation.value = false;
+
   parts.value = []
 
   let response = await fetch(`https://rebrickable.com/api/v3/lego/sets/${active_set_id.value}-1/?key=${api_secret}`);
